@@ -7,7 +7,7 @@
 #include <SPI.h>
 
 // Define the pin connected to the LED
-const int ledPin = 7;
+const int ledPin = 9;
 
 // Variable to store the byte received via SPI interrupt
 volatile byte receivedByte = 0;

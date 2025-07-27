@@ -7,7 +7,7 @@
 #include <SPI.h>
 
 // Define the pin connected to the pushbutton
-const int buttonPin = 8;
+const int buttonPin = 2;
 
 // Define the Slave Select (SS) pin to enable/disable communication with the Slave
 const int ssPin = 10;
