@@ -1,37 +1,42 @@
 #include <SoftwareSerial.h>
 
-// Pins
-const int buttonPin = 2;
-const int ledPin = 8;
-const int buzzerPin = 9;
-const int rxPin = 10;
-const int txPin = 11;
+// ----------------------- Pin Definitions -------------------------
+const int buttonPin = 2;       // Digital input from button (used to send Morse)
+const int ledPin = 8;          // LED output for sending and receiving Morse feedback
+const int buzzerPin = 9;       // Buzzer output for received Morse feedback
+const int rxPin = 10;          // SoftwareSerial receive pin (Rx)
+const int txPin = 11;          // SoftwareSerial transmit pin (Tx)
 
-SoftwareSerial softSerial(rxPin, txPin); // RX, TX
+SoftwareSerial softSerial(rxPin, txPin);  // Create software-based serial port
 
-// Timing thresholds (ms)
-const int dotThreshold = 200;
-const int dashThreshold = 500;
-const int letterGap = 900;
-const int wordGap = 1200;
-const int debounceDelay = 50;
+// ------------------------ Timing Settings ------------------------
+const int dotThreshold = 200;      // Press duration ≤ 200ms = dot
+const int dashThreshold = 500;     // Press duration ≤ 500ms = dash
+const int letterGap = 900;         // Gap ≥ 900ms = new letter
+const int wordGap = 1200;          // Gap ≥ 1200ms = new word
+const int debounceDelay = 50;      // Delay to prevent false button reading
 
-bool lastButtonState = HIGH;
-unsigned long pressStartTime = 0;
-unsigned long releaseTime = 0;
-unsigned long lastDebounceTime = 0;
+// ----------------------- State Variables -------------------------
+bool lastButtonState = HIGH;       // Tracks last state of the button
+unsigned long pressStartTime = 0;  // Timestamp when button was pressed
+unsigned long releaseTime = 0;     // Timestamp when button was released
+unsigned long lastDebounceTime = 0;// For debouncing input
 
+// Button interaction state machine
 enum State { IDLE, PRESSED, RELEASED };
 State buttonState = IDLE;
 
-String currentMorseLetter = "";
-String receivedMorseBuffer = "";
+// Buffers for Morse characters
+String currentMorseLetter = "";     // For collecting user input
+String receivedMorseBuffer = "";    // For collecting incoming characters
 
+// -------------------- Morse Code Lookup Table --------------------
 struct MorseMap {
   const char* code;
   char letter;
 };
 
+// Complete table for A-Z and 0-9 in Morse
 MorseMap morseTable[] = {
   {".-", 'A'}, {"-...", 'B'}, {"-.-.", 'C'}, {"-..", 'D'}, {".", 'E'},
   {"..-.", 'F'}, {"--.", 'G'}, {"....", 'H'}, {"..", 'I'}, {".---", 'J'},
@@ -43,24 +48,36 @@ MorseMap morseTable[] = {
   {".....", '5'}, {"-....", '6'}, {"--...", '7'}, {"---..", '8'}, {"----.", '9'}
 };
 
+// ----------------------------------------------------------------
+// Function: decodeMorse
+// Description: Convert Morse code string (e.g., ".-") to corresponding letter.
+// Returns '?' if pattern doesn't match.
+// ----------------------------------------------------------------
 char decodeMorse(String morse) {
   for (MorseMap entry : morseTable) {
     if (morse.equals(entry.code)) {
       return entry.letter;
     }
   }
-  return '?';
+  return '?';  // Unknown code
 }
 
-// Blink LED only (for sending)
+// ----------------------------------------------------------------
+// Function: blinkLED
+// Description: Blink LED (used while sending Morse signals).
+// Only LED is triggered (no buzzer).
+// ----------------------------------------------------------------
 void blinkLED(int duration) {
   digitalWrite(ledPin, HIGH);
   delay(duration);
   digitalWrite(ledPin, LOW);
-  delay(100);
+  delay(100);  // small pause between elements
 }
 
-// Blink LED + buzzer (for receiving)
+// ----------------------------------------------------------------
+// Function: blinkLEDandBuzzer
+// Description: Used when receiving Morse code. LED and buzzer activate.
+// ----------------------------------------------------------------
 void blinkLEDandBuzzer(int duration) {
   digitalWrite(ledPin, HIGH);
   digitalWrite(buzzerPin, HIGH);
@@ -70,27 +87,41 @@ void blinkLEDandBuzzer(int duration) {
   delay(100);
 }
 
+// ----------------------------------------------------------------
+// Function: setup
+// Description: Initializes pins, serial communication, and states.
+// ----------------------------------------------------------------
 void setup() {
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(buttonPin, INPUT_PULLUP);  // Using internal pull-up resistor
   pinMode(ledPin, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
 
-  Serial.begin(9600);
-  softSerial.begin(9600);
+  Serial.begin(9600);       // For debugging
+  softSerial.begin(9600);   // Communication with another Arduino
+
   Serial.println("Bidirectional Morse Ready");
 }
 
+// ----------------------------------------------------------------
+// Function: loop
+// Description: Continuously checks for button presses and serial input.
+// ----------------------------------------------------------------
 void loop() {
-  handleButton();
-  handleReceive();
+  handleButton();   // Handle Morse code sending (via button)
+  handleReceive();  // Handle Morse code receiving (via serial)
 }
 
-// Handle button press and sending Morse
+// ----------------------------------------------------------------
+// Function: handleButton
+// Description: Manages state machine for button interaction.
+// Detects dot/dash based on press duration and manages timing gaps
+// to detect letter and word boundaries.
+// ----------------------------------------------------------------
 void handleButton() {
   bool currentButtonState = digitalRead(buttonPin);
   unsigned long now = millis();
 
-  // Debounce
+  // Debounce logic
   if (currentButtonState != lastButtonState) {
     lastDebounceTime = now;
   }
@@ -109,15 +140,17 @@ void handleButton() {
       case PRESSED:
         if (!isPressed) {
           unsigned long pressDuration = now - pressStartTime;
+
           if (pressDuration <= dotThreshold) {
             currentMorseLetter += ".";
             Serial.println("[sent] Morse: .");
-            blinkLED(200);  // LED only blink for dot
+            blinkLED(200);
           } else if (pressDuration <= dashThreshold) {
             currentMorseLetter += "-";
             Serial.println("[sent] Morse: -");
-            blinkLED(600);  // LED only blink for dash
+            blinkLED(600);
           }
+
           releaseTime = now;
           buttonState = RELEASED;
         }
@@ -129,14 +162,18 @@ void handleButton() {
           buttonState = PRESSED;
         } else {
           unsigned long gap = now - releaseTime;
+
+          // Handle word gap
           if (gap >= wordGap) {
             sendAndPrintCurrentLetter();
-            softSerial.print(" ");
+            softSerial.print(" ");  // Send word space
             Serial.println("[sent] Word gap");
             buttonState = IDLE;
-          } else if (gap >= letterGap) {
+          }
+          // Handle letter gap
+          else if (gap >= letterGap) {
             sendAndPrintCurrentLetter();
-            softSerial.print("/");
+            softSerial.print("/"); // Send letter separator
             Serial.println("[sent] Letter gap");
             buttonState = IDLE;
           }
@@ -148,28 +185,40 @@ void handleButton() {
   lastButtonState = currentButtonState;
 }
 
-// Send and decode letter
+// ----------------------------------------------------------------
+// Function: sendAndPrintCurrentLetter
+// Description: Converts current Morse buffer to a letter, prints it,
+// sends the raw Morse to the other Arduino, and resets buffer.
+// ----------------------------------------------------------------
 void sendAndPrintCurrentLetter() {
   if (currentMorseLetter.length() > 0) {
     Serial.print("[final sent] Morse: ");
     Serial.println(currentMorseLetter);
+
     char letter = decodeMorse(currentMorseLetter);
     Serial.print("[decoded]: ");
     Serial.println(letter);
-    softSerial.print(currentMorseLetter);
-    currentMorseLetter = "";
+
+    softSerial.print(currentMorseLetter); // Send Morse raw
+    currentMorseLetter = "";              // Clear buffer
   }
 }
 
-// Handle received Morse input
+// ----------------------------------------------------------------
+// Function: handleReceive
+// Description: Reads incoming Morse characters from softSerial.
+// Handles decoding when a full letter or word is received.
+// ----------------------------------------------------------------
 void handleReceive() {
   while (softSerial.available()) {
     char c = softSerial.read();
 
     if (c == '.' || c == '-') {
       receivedMorseBuffer += c;
-      blinkLEDandBuzzer(c == '.' ? 200 : 600);  // LED + buzzer on receive dot/dash
-    } else if (c == '/') {
+      blinkLEDandBuzzer(c == '.' ? 200 : 600);
+    }
+    // End of letter
+    else if (c == '/') {
       if (receivedMorseBuffer.length() > 0) {
         char decoded = decodeMorse(receivedMorseBuffer);
         Serial.print("[recv] Morse: ");
@@ -179,7 +228,9 @@ void handleReceive() {
         receivedMorseBuffer = "";
       }
       delay(200);
-    } else if (c == ' ') {
+    }
+    // End of word
+    else if (c == ' ') {
       if (receivedMorseBuffer.length() > 0) {
         char decoded = decodeMorse(receivedMorseBuffer);
         Serial.print("[recv] Morse: ");
